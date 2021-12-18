@@ -6,12 +6,18 @@ import android.os.Bundle
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
+import android.view.LayoutInflater
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.view.isVisible
+import androidx.room.Room
+import com.example.calculatorapp.model.History
+import org.w3c.dom.Text
 
 class MainActivity : AppCompatActivity() {
 
@@ -23,12 +29,28 @@ class MainActivity : AppCompatActivity() {
         findViewById(R.id.resultTextView)
     }
 
+    private val historyLayout: View by lazy{
+        findViewById(R.id.historyLayout)
+    }
+
+    private val historyLinearLayout : LinearLayout by lazy{
+        findViewById(R.id.historyLinearLayout)
+    }
+
+    lateinit var db: AppDatabase
+
     private var isOperator = false
     private var hasOperator = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        db = Room.databaseBuilder( // databaseBuilder의 첫번째 인자는 context, 두번째 인자는 class 이름, 세번째 인자는 name
+            applicationContext,
+            AppDatabase::class.java,
+            "historyDB"
+        ).build()
     }
 
     fun buttonClicked(v : View){
@@ -125,6 +147,11 @@ class MainActivity : AppCompatActivity() {
         val expressionText = expressionTextView.text.toString()
         val resultText = calculateExpression()
 
+        // 네트워크 또는 디비와 관련된 작업들은 main Thread에서 실행하기 무겁기 때문에 sub thread에서 진행해야 한다.
+        Thread(Runnable {
+            db.historyDao().insertHistory((History(null, expressionText, resultText))) // uid 값을 null로 줘도 PrimaryKey이므로 들어갈 때마다 하나씩 올라간다.
+        }).start()
+
         resultTextView.text = ""
         expressionTextView.text = resultText
 
@@ -160,7 +187,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun historyButtonClicked(v : View){
+        historyLayout.isVisible = true
+        historyLinearLayout.removeAllViews() // LinearLayout 하위의 모든 View들이 삭제된다.
 
+        Thread(Runnable {
+            db.historyDao().getAll().reversed().forEach{ // 나중에 저장된게 밑으로 가기 때문에 최근 계산값을 위로 오게 하기 위해서 reverse 함수를 이용해서 리스트를 뒤집어준다.
+                runOnUiThread{ // sub Thread에서 UI 자원을 다루기 위해서는 runOnUiThread 함수를 이용해야 한다.
+                    val historyView = LayoutInflater.from(this).inflate(R.layout.history_row, null, false) // 두번째 인자는 root인데, historyLinearLayout을 root로 갖지만, 나중에 addView로 붙여줄것이기 때문에 지금은 null값을 줌
+                    historyView.findViewById<TextView>(R.id.expressionTextView).text = it.expression
+                    historyView.findViewById<TextView>(R.id.resultTextView).text = "=${it.result}"
+
+                    historyLinearLayout.addView(historyView)
+                }
+            }
+        }).start()
+    }
+
+    fun closeHistoryButtonClicked(v : View){
+        historyLayout.isVisible = false
+    }
+
+    fun historyClearButtonClicked(v : View){
+        historyLinearLayout.removeAllViews()
+
+        Thread(Runnable{
+            db.historyDao().deleteAll()
+        }).start()
     }
 }
 
